@@ -429,8 +429,8 @@ static bool allCallersPassValidPointerForArgument(
   const DataLayout &DL = Callee->getParent()->getDataLayout();
   APInt Bytes(64, NeededDerefBytes);
 
-  if (RecursiveCalls.size())
-    return true;
+  // if (RecursiveCalls.size())
+  //   return true;
 
   // Check if the argument itself is marked dereferenceable and aligned.
   if (isDereferenceableAndAlignedPointer(Arg, NeededAlign, Bytes, DL))
@@ -440,6 +440,13 @@ static bool allCallersPassValidPointerForArgument(
   // direct callees.
   return all_of(Callee->users(), [&](User *U) {
     CallBase &CB = cast<CallBase>(*U);
+    if (RecursiveCalls.contains(&CB))
+      return true;
+
+    // if (RecursiveCalls.size() &&
+    //     CB.getCalledFunction()->getName() == Callee->getName())
+    //   return true;
+
     return isDereferenceableAndAlignedPointer(CB.getArgOperand(Arg->getArgNo()),
                                               NeededAlign, Bytes, DL);
   });
@@ -646,9 +653,11 @@ static bool findArgParts(Argument *Arg, const DataLayout &DL, AAResults &AAR,
         return false;
 
       int64_t Off = Offset.getSExtValue();
-      if (Off)
+      if (Off) {
         LLVM_DEBUG(dbgs() << "ArgPromotion of " << *Arg << " failed: "
                           << "pointer offset is not equal to zero\n");
+        return false;
+      }
 
       // We limit promotion to only promoting up to a fixed number of elements
       // of the aggregate.
