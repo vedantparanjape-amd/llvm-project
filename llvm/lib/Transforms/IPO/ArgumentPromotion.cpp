@@ -493,6 +493,7 @@ static bool allCallersPassValidPointerForArgument(
 /// parts it can be promoted into.
 static bool findArgParts(Argument *Arg, const DataLayout &DL, AAResults &AAR,
                          unsigned MaxElements, bool IsRecursive,
+                         bool isSelfRecursive,
                          SmallVectorImpl<OffsetAndArgPart> &ArgPartsVec) {
   // Quick exit for unused arguments
   if (Arg->use_empty())
@@ -660,7 +661,7 @@ static bool findArgParts(Argument *Arg, const DataLayout &DL, AAResults &AAR,
 
     auto *CB = dyn_cast<CallBase>(V);
     Value *PtrArg = cast<Value>(U);
-    if (IsRecursive && CB && PtrArg) {
+    if (isSelfRecursive && CB && PtrArg) {
       Type *PtrTy = PtrArg->getType();
       APInt Offset(DL.getIndexTypeSizeInBits(PtrTy), 0);
       PtrArg = PtrArg->stripAndAccumulateConstantOffsets(
@@ -672,8 +673,8 @@ static bool findArgParts(Argument *Arg, const DataLayout &DL, AAResults &AAR,
       if (Offset.getSignificantBits() >= 64)
         return false;
 
-      if (!checkIfPointerIsDereferenced(Loads, PtrArg))
-        return false;
+      // if (!checkIfPointerIsDereferenced(Loads, PtrArg))
+      //   return false;
 
       int64_t Off = Offset.getSExtValue();
       if (Off) {
@@ -789,6 +790,10 @@ static bool areTypesABICompatible(ArrayRef<Type *> Types, const Function &F,
 /// calls the DoPromotion method.
 static Function *promoteArguments(Function *F, FunctionAnalysisManager &FAM,
                                   unsigned MaxElements, bool IsRecursive) {
+  // Due to complexity of handling cases where the SCC has more than one
+  // component. We want to limit argument promotion of recursive calls to
+  // just functions that directly call themselves.
+  bool IsSelfRecursive = false;
   // Don't perform argument promotion for naked functions; otherwise we can end
   // up removing parameters that are seemingly 'not used' as they are referred
   // to in the assembly.
@@ -834,8 +839,10 @@ static Function *promoteArguments(Function *F, FunctionAnalysisManager &FAM,
     if (CB->isMustTailCall())
       return nullptr;
 
-    if (CB->getFunction() == F)
+    if (CB->getFunction() == F) {
       IsRecursive = true;
+      IsSelfRecursive = true;
+    }
   }
 
   // Can't change signature of musttail caller
@@ -869,7 +876,8 @@ static Function *promoteArguments(Function *F, FunctionAnalysisManager &FAM,
     // If we can promote the pointer to its value.
     SmallVector<OffsetAndArgPart, 4> ArgParts;
 
-    if (findArgParts(PtrArg, DL, AAR, MaxElements, IsRecursive, ArgParts)) {
+    if (findArgParts(PtrArg, DL, AAR, MaxElements, IsRecursive, IsSelfRecursive,
+                     ArgParts)) {
       SmallVector<Type *, 4> Types;
       for (const auto &Pair : ArgParts)
         Types.push_back(Pair.second.Ty);
