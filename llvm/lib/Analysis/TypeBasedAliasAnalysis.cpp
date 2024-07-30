@@ -603,6 +603,7 @@ static bool mayBeAccessToSubobjectOf(TBAAStructTagNode BaseTag,
   bool NewFormat = BaseTag.isNewFormat();
   TBAAStructTypeNode BaseType(BaseTag.getBaseType());
   uint64_t OffsetInBase = BaseTag.getOffset();
+  uint64_t OffsetOfSubobject = SubobjectTag.getOffset();
 
   for (;;) {
     // In the old format there is no distinction between fields and parent
@@ -613,7 +614,14 @@ static bool mayBeAccessToSubobjectOf(TBAAStructTagNode BaseTag,
     }
 
     if (BaseType.getNode() == SubobjectTag.getBaseType()) {
-      bool SameMemberAccess = OffsetInBase == SubobjectTag.getOffset();
+      bool SameMemberAccess = OffsetInBase == OffsetOfSubobject;
+      
+      if (!SameMemberAccess && BaseType.getNode() != BaseTag.getAccessType())
+        return false;
+
+      if (!SameMemberAccess && BaseType.getNumFields())
+        SameMemberAccess = (BaseType.getField(OffsetOfSubobject).getNode() == SubobjectTag.getAccessType());
+
       if (GenericTag) {
         *GenericTag = SameMemberAccess ? SubobjectTag.getNode() :
                                          createAccessTag(CommonType);
